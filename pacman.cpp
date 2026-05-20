@@ -462,6 +462,403 @@ void drawWinScreen() {
 // UPDATE
 // ===========================================================================
 
+void updatePacman() {
+    // Apply buffered direction if the path is clear
+    if (canMove(pacman.x, pacman.y, pacman.nextDirection))
+        pacman.direction = pacman.nextDirection;
+
+    // Move
+    if (canMove(pacman.x, pacman.y, pacman.direction)) {
+        pacman.x += DX4[pacman.direction] * pacman.speed;
+        pacman.y += DY4[pacman.direction] * pacman.speed;
+    }
+
+    // Horizontal tunnel wrap-around
+    if (pacman.x < 0)            pacman.x = MAZE_WIDTH - 1;
+    if (pacman.x >= MAZE_WIDTH)  pacman.x = 0;
+
+    // Mouth animation
+    pacman.mouthAngle += pacman.mouthOpening * 3;
+    if (pacman.mouthAngle >= 45) pacman.mouthOpening = -1;
+    if (pacman.mouthAngle <= 0)  pacman.mouthOpening =  1;
+
+    // Eat dot / power pellet at current cell
+    int gx = (int)(pacman.x + 0.5f);
+    int gy = (int)(pacman.y + 0.5f);
+
+    if (maze[gy][gx] == 0) {
+        maze[gy][gx] = 2;
+        dotsEaten++;
+        pacman.score += 10;
+
+    } else if (maze[gy][gx] == 4) {
+        maze[gy][gx] = 2;
+        dotsEaten++;
+        pacman.score += 50;
+        // Energize Pacman — frighten all active ghosts
+        pacman.energizedTimer = 8.0f;
+        for (int i = 0; i < 4; i++) {
+            if (!ghosts[i].exitingHouse && !ghosts[i].eaten) {
+                ghosts[i].frightened    = true;
+                ghosts[i].frightenTimer = 8.0f;
+                // Reverse direction when frightened
+                ghosts[i].direction = (ghosts[i].direction + 2) % 4;
+            }
+        }
+    }
+
+    // Win condition
+    if (dotsEaten >= totalDots) {
+        currentState = WIN;
+        if (pacman.score > highScore) highScore = pacman.score;
+    }
+
+    // Tick timers
+    const float dt = 0.016f;
+    if (pacman.invincibleTimer > 0.0f) {
+        pacman.invincibleTimer -= dt;
+        if (pacman.invincibleTimer < 0.0f) pacman.invincibleTimer = 0.0f;
+    }
+    if (pacman.energizedTimer > 0.0f) {
+        pacman.energizedTimer -= dt;
+        if (pacman.energizedTimer < 0.0f) {
+            pacman.energizedTimer = 0.0f;
+            // Un-frighten ghosts when power wears off
+            for (int i = 0; i < 4; i++) {
+                ghosts[i].frightened    = false;
+                ghosts[i].frightenTimer = 0.0f;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// updateGhosts
+//
+// PHASE 1 — EXIT HOUSE
+//   Wait until gameTime >= exitDelay, then follow a fixed path:
+//   drift to column 13 → move up to row 11 (open corridor) → begin roaming.
+//
+// PHASE 2 — GHOST AI (runs only at cell centres / intersections)
+//
+//   Normal mode — personality targets:
+//     Blinky (0): Pacman's exact cell                  [relentless chaser]
+//     Pinky  (1): 4 cells ahead of Pacman's direction  [ambush attacker]
+//     Inky   (2): reflection of Blinky through Pacman  [pincer flanker]
+//     Clyde  (3): chase if far (>8), scatter if close  [erratic / shy]
+//
+//   Frightened mode — flee from Pacman's position.
+//
+//   Eaten mode — return to ghost house centre (13,14).
+// ---------------------------------------------------------------------------
+void updateGhosts() {
+    int eatBonus = 200;
+
+    for (int i = 0; i < 4; i++) {
+
+        Ghost &g = ghosts[i];
+
+        // =========================================================
+        // PHASE 1 : EXIT GHOST HOUSE
+        // =========================================================
+        if (g.exitingHouse) {
+
+            if (gameTime < g.exitDelay)
+                continue;
+
+            const float exitX = 13.0f;
+            const float exitY = 11.0f;
+
+            // Move horizontally toward exit column
+            if (fabs(g.x - exitX) > g.speed) {
+
+                if (g.x < exitX)
+                    g.x += g.speed;
+                else
+                    g.x -= g.speed;
+            }
+            else {
+
+                g.x = exitX;
+
+                // Move upward out of house
+                if (g.y > exitY + g.speed) {
+
+                    g.y -= g.speed;
+                }
+                else {
+
+                    // Fully exited
+                    g.x = exitX;
+                    g.y = exitY;
+
+                    g.exitingHouse = false;
+
+                    // Start moving left or right
+                    g.direction = (rand() % 2 == 0) ? 0 : 2;
+                }
+            }
+
+            continue;
+        }
+
+        // =========================================================
+        // EATEN GHOST RETURNS HOME
+        // =========================================================
+        if (g.eaten) {
+
+            float hx = 13.0f;
+            float hy = 14.0f;
+
+            chaseGreedy(g, hx, hy);
+
+            if (canMove(g.x, g.y, g.direction)) {
+
+                g.x += DX4[g.direction] * g.speed * 2.0f;
+                g.y += DY4[g.direction] * g.speed * 2.0f;
+            }
+
+            // Reached home
+            if (fabs(g.x - hx) < 0.3f &&
+                fabs(g.y - hy) < 0.3f) {
+
+                g.x = hx;
+                g.y = hy;
+
+                g.eaten = false;
+                g.frightened = false;
+                g.frightenTimer = 0.0f;
+
+                g.exitingHouse = true;
+                g.exitDelay = gameTime + 3.0f;
+            }
+
+            continue;
+        }
+
+        // =========================================================
+        // PHASE 2 : NORMAL GHOST AI
+        // =========================================================
+
+        // Detect if ghost is close to tile center
+        float centerX = floorf(g.x + 0.5f);
+        float centerY = floorf(g.y + 0.5f);
+
+        float fx = fabs(g.x - centerX);
+        float fy = fabs(g.y - centerY);
+
+        bool atCenter = (fx < 0.08f && fy < 0.08f);
+
+        // ONLY update direction near intersections
+        if (atCenter) {
+
+            // Snap to exact center
+            g.x = floorf(g.x + 0.5f);
+            g.y = floorf(g.y + 0.5f);
+
+            // -----------------------------------------------------
+            // FRIGHTENED MODE
+            // -----------------------------------------------------
+            if (g.frightened) {
+
+                fleeGreedy(g, pacman.x, pacman.y);
+
+                g.frightenTimer -= 0.016f;
+
+                if (g.frightenTimer <= 0.0f) {
+
+                    g.frightened = false;
+                    g.frightenTimer = 0.0f;
+                }
+            }
+
+            // -----------------------------------------------------
+            // NORMAL CHASE MODE
+            // -----------------------------------------------------
+            else {
+
+                int pacGX = (int)(pacman.x + 0.5f);
+                int pacGY = (int)(pacman.y + 0.5f);
+
+                float tx, ty;
+
+                // =========================
+                // BLINKY
+                // =========================
+                if (i == 0) {
+
+                    tx = (float)pacGX;
+                    ty = (float)pacGY;
+                }
+
+                // =========================
+                // PINKY
+                // =========================
+                else if (i == 1) {
+
+                    tx = pacGX +
+                         DX4[pacman.direction] * 4;
+
+                    ty = pacGY +
+                         DY4[pacman.direction] * 4;
+                }
+
+                // =========================
+                // INKY
+                // =========================
+                else if (i == 2) {
+
+                    int pivX =
+                        pacGX +
+                        DX4[pacman.direction] * 2;
+
+                    int pivY =
+                        pacGY +
+                        DY4[pacman.direction] * 2;
+
+                    int blX =
+                        (int)(ghosts[0].x + 0.5f);
+
+                    int blY =
+                        (int)(ghosts[0].y + 0.5f);
+
+                    tx = pivX + (pivX - blX);
+                    ty = pivY + (pivY - blY);
+                }
+
+                // =========================
+                // CLYDE
+                // =========================
+                else {
+
+                    float d =
+                        sqrtf(
+                            powf(g.x - pacman.x, 2) +
+                            powf(g.y - pacman.y, 2)
+                        );
+
+                    if (d > 8.0f) {
+
+                        tx = (float)pacGX;
+                        ty = (float)pacGY;
+                    }
+                    else {
+
+                        tx = 1.0f;
+                        ty = (float)(MAZE_HEIGHT - 2);
+                    }
+                }
+
+                // Choose best direction
+                chaseGreedy(g, tx, ty);
+            }
+        }
+
+        // =========================================================
+        // MOVE GHOST
+        // =========================================================
+        if (canMove(g.x, g.y, g.direction)) {
+            // Snap cleanly when very close to center
+        if (atCenter) {
+            g.x = centerX;
+            g.y = centerY;
+        }
+
+            g.x += DX4[g.direction] * g.speed;
+            g.y += DY4[g.direction] * g.speed;
+        }
+        else {
+
+            // If blocked, try another direction
+            int opp = (g.direction + 2) % 4;
+
+            bool moved = false;
+
+            for (int d = 0; d < 4; d++) {
+
+                if (d == opp)
+                    continue;
+
+                if (canMove(g.x, g.y, d)) {
+
+                    g.direction = d;
+
+                    g.x += DX4[d] * g.speed;
+                    g.y += DY4[d] * g.speed;
+
+                    moved = true;
+                    break;
+                }
+            }
+
+            // Dead-end → reverse
+            if (!moved &&
+                canMove(g.x, g.y, opp)) {
+
+                g.direction = opp;
+
+                g.x += DX4[opp] * g.speed;
+                g.y += DY4[opp] * g.speed;
+            }
+        }
+
+        // =========================================================
+        // COLLISION WITH PACMAN
+        // =========================================================
+        float dist =
+            sqrtf(
+                powf(g.x - pacman.x, 2) +
+                powf(g.y - pacman.y, 2)
+            );
+
+        if (dist < 0.6f && !g.exitingHouse) {
+
+            // Pacman eats ghost
+            if (g.frightened) {
+
+                g.eaten = true;
+                g.frightened = false;
+
+                pacman.score += eatBonus;
+
+                eatBonus *= 2;
+            }
+
+            // Ghost kills Pacman
+            else if (pacman.invincibleTimer <= 0.0f) {
+
+                pacman.lives--;
+
+                if (pacman.lives <= 0) {
+
+                    currentState = GAME_OVER;
+                }
+                else {
+
+                    int savedLives = pacman.lives;
+                    int savedScore = pacman.score;
+
+                    initPacman();
+                    initGhosts(gameTime);
+
+                    pacman.lives = savedLives;
+                    pacman.score = savedScore;
+
+                    pacman.invincibleTimer = 2.0f;
+                }
+            }
+        }
+
+        // =========================================================
+        // SPEED INCREASE OVER TIME
+        // =========================================================
+        g.speed = 0.08f + gameTime * 0.001f;
+
+        if (g.speed > 0.15f)
+            g.speed = 0.15f;
+    }
+}
+
 // ===========================================================================
 // GLUT CALLBACKS
 // ===========================================================================
