@@ -295,9 +295,149 @@ void fleeGreedy(Ghost& ghost, float targetX, float targetY) {
     else if (!canMove(ghost.x, ghost.y, cur)) ghost.direction = opp;
 }
 
+// ===========================================================================
+// DRAWING
+// ===========================================================================
 
+void drawCircle(float cx, float cy, float r, int seg) {
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(cx, cy);
+    for (int i = 0; i <= seg; i++) {
+        float a = 2.0f * M_PI * i / seg;
+        glVertex2f(cx + cos(a) * r, cy + sin(a) * r);
+    }
+    glEnd();
+}
 
+// World-to-screen helper for maze cells
+float cellX(float gx) { return MAZE_OFFSET_X + gx * CELL_SIZE; }
+float cellY(float gy) { return MAZE_OFFSET_Y + gy * CELL_SIZE; }
 
+void drawMaze() {
+    for (int i = 0; i < MAZE_HEIGHT; i++) {
+        for (int j = 0; j < MAZE_WIDTH; j++) {
+            float x = cellX(j);
+            float y = cellY(i);
+
+            if (maze[i][j] == 1) {
+                // Wall — deep blue with a subtle lighter border for depth
+                glColor3f(0.05f, 0.05f, 0.55f);
+                glBegin(GL_QUADS);
+                glVertex2f(x, y); glVertex2f(x + CELL_SIZE, y);
+                glVertex2f(x + CELL_SIZE, y + CELL_SIZE); glVertex2f(x, y + CELL_SIZE);
+                glEnd();
+                // Inner highlight
+                glColor3f(0.1f, 0.1f, 0.8f);
+                glBegin(GL_LINE_LOOP);
+                glVertex2f(x + 1, y + 1); glVertex2f(x + CELL_SIZE - 1, y + 1);
+                glVertex2f(x + CELL_SIZE - 1, y + CELL_SIZE - 1); glVertex2f(x + 1, y + CELL_SIZE - 1);
+                glEnd();
+
+            }
+            else if (maze[i][j] == 0) {
+                // Regular dot
+                glColor3f(1.0f, 0.9f, 0.7f);
+                drawCircle(x + CELL_SIZE / 2, y + CELL_SIZE / 2, 1.5f, 8);
+
+            }
+            else if (maze[i][j] == 4) {
+                // Power pellet — larger, pulsing yellow
+                float pulse = 2.5f + 1.0f * sinf(gameTime * 5.0f);
+                glColor3f(1.0f, 1.0f, 0.2f);
+                drawCircle(x + CELL_SIZE / 2, y + CELL_SIZE / 2, pulse, 16);
+            }
+            // cells 2 and 3 render as black background
+        }
+    }
+}
+
+void drawPacman() {
+    float sx = cellX(pacman.x) + CELL_SIZE / 2;
+    float sy = cellY(pacman.y) + CELL_SIZE / 2;
+
+    glPushMatrix();
+    glTranslatef(sx, sy, 0);
+    glRotatef(-pacman.direction * 90.0f, 0, 0, 1);
+
+    // Colour: flashes white during grace period, yellow when energized, normal yellow
+    if (pacman.invincibleTimer > 0.0f) {
+        int f = (int)(pacman.invincibleTimer * 10) % 2;
+        if (f == 0) glColor3f(1, 1, 1); else glColor3f(1, 1, 0);
+    }
+    else if (pacman.energizedTimer > 0.0f) {
+        glColor3f(1.0f, 0.8f, 0.0f); // slightly orange tint while powered
+    }
+    else {
+        glColor3f(1.0f, 1.0f, 0.0f);
+    }
+
+    float sa = pacman.mouthAngle * M_PI / 180.0f;
+    float ea = (360.0f - pacman.mouthAngle) * M_PI / 180.0f;
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(0, 0);
+    for (float a = sa; a <= ea; a += 0.1f)
+        glVertex2f(cos(a) * 8, sin(a) * 8);
+    glEnd();
+    glPopMatrix();
+}
+
+void drawGhost(Ghost& g) {
+    float x = cellX(g.x) + CELL_SIZE / 2;
+    float y = cellY(g.y) + CELL_SIZE / 2;
+
+    // Frightened ghosts are blue; eaten ghosts are just eyes (returning)
+    if (g.eaten) {
+        // Only draw eyes when returning to house
+        glColor3f(1, 1, 1);
+        drawCircle(x - 3, y - 2, 2, 16);
+        drawCircle(x + 3, y - 2, 2, 16);
+        glColor3f(0, 0, 1);
+        drawCircle(x - 3, y - 2, 1, 16);
+        drawCircle(x + 3, y - 2, 1, 16);
+        return;
+    }
+
+    if (g.frightened) {
+        // Flash white when fright is about to expire (last 2 seconds)
+        if (g.frightenTimer < 2.0f) {
+            int f = (int)(g.frightenTimer * 5) % 2;
+            if (f == 0) glColor3f(1, 1, 1); else glColor3f(0.1f, 0.1f, 0.8f);
+        }
+        else {
+            glColor3f(0.1f, 0.1f, 0.8f); // dark blue
+        }
+    }
+    else {
+        switch (g.color) {
+        case 0: glColor3f(1.0f, 0.0f, 0.0f);  break; // Blinky — red
+        case 1: glColor3f(1.0f, 0.75f, 0.8f);  break; // Pinky  — pink
+        case 2: glColor3f(0.0f, 1.0f, 1.0f);  break; // Inky   — cyan
+        case 3: glColor3f(1.0f, 0.65f, 0.0f);  break; // Clyde  — orange
+        }
+    }
+
+    // Dome
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(x, y);
+    for (int i = 0; i <= 180; i += 10) {
+        float a = i * M_PI / 180.0f;
+        glVertex2f(x + cos(a) * 8, y + sin(a) * 8);
+    }
+    glEnd();
+
+    // Wavy skirt
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(x, y);
+    glVertex2f(x - 8, y); glVertex2f(x - 6, y + 4); glVertex2f(x - 3, y);
+    glVertex2f(x, y + 4); glVertex2f(x + 3, y);   glVertex2f(x + 6, y + 4); glVertex2f(x + 8, y);
+    glEnd();
+
+    // Eyes (white + blue pupil)
+    glColor3f(1, 1, 1);
+    drawCircle(x - 3, y - 2, 2, 16); drawCircle(x + 3, y - 2, 2, 16);
+    glColor3f(0, 0, 1);
+    drawCircle(x - 3, y - 2, 1, 16); drawCircle(x + 3, y - 2, 1, 16);
+  
 void drawText(float x, float y, const char *text, void *font = GLUT_BITMAP_HELVETICA_18) {
     glRasterPos2f(x, y);
     for (const char *c = text; *c; c++)
@@ -857,6 +997,7 @@ void updateGhosts() {
         if (g.speed > 0.15f)
             g.speed = 0.15f;
     }
+
 }
 
 // ===========================================================================
