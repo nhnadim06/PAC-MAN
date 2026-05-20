@@ -425,7 +425,12 @@ void drawGhost(Ghost& g) {
         glVertex2f(x + cos(a) * 8, y + sin(a) * 8);
     }
     glEnd();
-
+    // Wavy skirt
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(x, y);
+    glVertex2f(x - 8, y); glVertex2f(x - 6, y + 4); glVertex2f(x - 3, y);
+    glVertex2f(x, y + 4); glVertex2f(x + 3, y);   glVertex2f(x + 6, y + 4); glVertex2f(x + 8, y);
+    glEnd();
 
 
 
