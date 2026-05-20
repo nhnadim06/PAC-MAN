@@ -437,7 +437,8 @@ void drawGhost(Ghost& g) {
     drawCircle(x - 3, y - 2, 2, 16); drawCircle(x + 3, y - 2, 2, 16);
     glColor3f(0, 0, 1);
     drawCircle(x - 3, y - 2, 1, 16); drawCircle(x + 3, y - 2, 1, 16);
-  
+}
+
 void drawText(float x, float y, const char *text, void *font = GLUT_BITMAP_HELVETICA_18) {
     glRasterPos2f(x, y);
     for (const char *c = text; *c; c++)
