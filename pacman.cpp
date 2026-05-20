@@ -296,110 +296,242 @@ void fleeGreedy(Ghost& ghost, float targetX, float targetY) {
 }
 
 
-
-
-
 // ===========================================================================
-// GLUT CALLBACKS
+// DRAWING
 // ===========================================================================
 
-void display() {
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    switch (currentState) {
-    case MENU:
-        drawMenu();
-        break;
-    case PAUSED:
-        drawMaze(); drawPacman();
-        for (int i = 0;i < 4;i++) drawGhost(ghosts[i]);
-        drawHUD(); drawPauseScreen();
-        break;
-    case PLAYING:
-        drawMaze(); drawPacman();
-        for (int i = 0;i < 4;i++) drawGhost(ghosts[i]);
-        drawHUD();
-        break;
-    case GAME_OVER: drawGameOver(); break;
-    case WIN:       drawWinScreen(); break;
+void drawCircle(float cx, float cy, float r, int seg) {
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(cx, cy);
+    for (int i = 0; i <= seg; i++) {
+        float a = 2.0f * M_PI * i / seg;
+        glVertex2f(cx + cos(a) * r, cy + sin(a) * r);
     }
-
-    glutSwapBuffers();
+    glEnd();
 }
 
-void update(int v) {
-    if (currentState == PLAYING) {
-        gameTime = glutGet(GLUT_ELAPSED_TIME) / 1000.0f - startTime;
-        updatePacman();
-        updateGhosts();
-    }
-    glutPostRedisplay();
-    glutTimerFunc(16, update, 0); // ~60 fps
-}
+// World-to-screen helper for maze cells
+float cellX(float gx) { return MAZE_OFFSET_X + gx * CELL_SIZE; }
+float cellY(float gy) { return MAZE_OFFSET_Y + gy * CELL_SIZE; }
 
-void keyboard(unsigned char key, int x, int y) {
-    switch (key) {
-    case 27: // ESC
-        if (currentState == PLAYING || currentState == PAUSED ||
-            currentState == GAME_OVER || currentState == WIN)
-            currentState = MENU;
-        else exit(0);
-        break;
-    case ' ':
-        if (currentState == MENU || currentState == GAME_OVER || currentState == WIN) {
-            resetGame(); currentState = PLAYING;
+void drawMaze() {
+    for (int i = 0; i < MAZE_HEIGHT; i++) {
+        for (int j = 0; j < MAZE_WIDTH; j++) {
+            float x = cellX(j);
+            float y = cellY(i);
+
+            if (maze[i][j] == 1) {
+                // Wall — deep blue with a subtle lighter border for depth
+                glColor3f(0.05f, 0.05f, 0.55f);
+                glBegin(GL_QUADS);
+                glVertex2f(x, y); glVertex2f(x + CELL_SIZE, y);
+                glVertex2f(x + CELL_SIZE, y + CELL_SIZE); glVertex2f(x, y + CELL_SIZE);
+                glEnd();
+                // Inner highlight
+                glColor3f(0.1f, 0.1f, 0.8f);
+                glBegin(GL_LINE_LOOP);
+                glVertex2f(x + 1, y + 1); glVertex2f(x + CELL_SIZE - 1, y + 1);
+                glVertex2f(x + CELL_SIZE - 1, y + CELL_SIZE - 1); glVertex2f(x + 1, y + CELL_SIZE - 1);
+                glEnd();
+
+            }
+            else if (maze[i][j] == 0) {
+                // Regular dot
+                glColor3f(1.0f, 0.9f, 0.7f);
+                drawCircle(x + CELL_SIZE / 2, y + CELL_SIZE / 2, 1.5f, 8);
+
+            }
+            else if (maze[i][j] == 4) {
+                // Power pellet — larger, pulsing yellow
+                float pulse = 2.5f + 1.0f * sinf(gameTime * 5.0f);
+                glColor3f(1.0f, 1.0f, 0.2f);
+                drawCircle(x + CELL_SIZE / 2, y + CELL_SIZE / 2, pulse, 16);
+            }
+            // cells 2 and 3 render as black background
         }
-        break;
-    case 'p': case 'P':
+    }
+}
+
+void drawPacman() {
+    float sx = cellX(pacman.x) + CELL_SIZE / 2;
+    float sy = cellY(pacman.y) + CELL_SIZE / 2;
+
+    glPushMatrix();
+    glTranslatef(sx, sy, 0);
+    glRotatef(-pacman.direction * 90.0f, 0, 0, 1);
+
+    // Colour: flashes white during grace period, yellow when energized, normal yellow
+    if (pacman.invincibleTimer > 0.0f) {
+        int f = (int)(pacman.invincibleTimer * 10) % 2;
+        if (f == 0) glColor3f(1, 1, 1); else glColor3f(1, 1, 0);
+    }
+    else if (pacman.energizedTimer > 0.0f) {
+        glColor3f(1.0f, 0.8f, 0.0f); // slightly orange tint while powered
+    }
+    else {
+        glColor3f(1.0f, 1.0f, 0.0f);
+    }
+
+    float sa = pacman.mouthAngle * M_PI / 180.0f;
+    float ea = (360.0f - pacman.mouthAngle) * M_PI / 180.0f;
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(0, 0);
+    for (float a = sa; a <= ea; a += 0.1f)
+        glVertex2f(cos(a) * 8, sin(a) * 8);
+    glEnd();
+    glPopMatrix();
+}
+
+void drawGhost(Ghost& g) {
+    float x = cellX(g.x) + CELL_SIZE / 2;
+    float y = cellY(g.y) + CELL_SIZE / 2;
+
+    // Frightened ghosts are blue; eaten ghosts are just eyes (returning)
+    if (g.eaten) {
+        // Only draw eyes when returning to house
+        glColor3f(1, 1, 1);
+        drawCircle(x - 3, y - 2, 2, 16);
+        drawCircle(x + 3, y - 2, 2, 16);
+        glColor3f(0, 0, 1);
+        drawCircle(x - 3, y - 2, 1, 16);
+        drawCircle(x + 3, y - 2, 1, 16);
+        return;
+    }
+
+    if (g.frightened) {
+        // Flash white when fright is about to expire (last 2 seconds)
+        if (g.frightenTimer < 2.0f) {
+            int f = (int)(g.frightenTimer * 5) % 2;
+            if (f == 0) glColor3f(1, 1, 1); else glColor3f(0.1f, 0.1f, 0.8f);
+        }
+        else {
+            glColor3f(0.1f, 0.1f, 0.8f); // dark blue
+        }
+    }
+    else {
+        switch (g.color) {
+        case 0: glColor3f(1.0f, 0.0f, 0.0f);  break; // Blinky — red
+        case 1: glColor3f(1.0f, 0.75f, 0.8f);  break; // Pinky  — pink
+        case 2: glColor3f(0.0f, 1.0f, 1.0f);  break; // Inky   — cyan
+        case 3: glColor3f(1.0f, 0.65f, 0.0f);  break; // Clyde  — orange
+        }
+    }
+
+    // Dome
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(x, y);
+    for (int i = 0; i <= 180; i += 10) {
+        float a = i * M_PI / 180.0f;
+        glVertex2f(x + cos(a) * 8, y + sin(a) * 8);
+    }
+    glEnd();
+
+
+
+
+
+
+    // ===========================================================================
+    // GLUT CALLBACKS
+    // ===========================================================================
+
+    void display() {
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        switch (currentState) {
+        case MENU:
+            drawMenu();
+            break;
+        case PAUSED:
+            drawMaze(); drawPacman();
+            for (int i = 0;i < 4;i++) drawGhost(ghosts[i]);
+            drawHUD(); drawPauseScreen();
+            break;
+        case PLAYING:
+            drawMaze(); drawPacman();
+            for (int i = 0;i < 4;i++) drawGhost(ghosts[i]);
+            drawHUD();
+            break;
+        case GAME_OVER: drawGameOver(); break;
+        case WIN:       drawWinScreen(); break;
+        }
+
+        glutSwapBuffers();
+    }
+
+    void update(int v) {
         if (currentState == PLAYING) {
-            currentState = PAUSED;
+            gameTime = glutGet(GLUT_ELAPSED_TIME) / 1000.0f - startTime;
+            updatePacman();
+            updateGhosts();
         }
-        else if (currentState == PAUSED) {
-            currentState = PLAYING;
-            startTime = glutGet(GLUT_ELAPSED_TIME) / 1000.0f - gameTime;
+        glutPostRedisplay();
+        glutTimerFunc(16, update, 0); // ~60 fps
+    }
+
+    void keyboard(unsigned char key, int x, int y) {
+        switch (key) {
+        case 27: // ESC
+            if (currentState == PLAYING || currentState == PAUSED ||
+                currentState == GAME_OVER || currentState == WIN)
+                currentState = MENU;
+            else exit(0);
+            break;
+        case ' ':
+            if (currentState == MENU || currentState == GAME_OVER || currentState == WIN) {
+                resetGame(); currentState = PLAYING;
+            }
+            break;
+        case 'p': case 'P':
+            if (currentState == PLAYING) {
+                currentState = PAUSED;
+            }
+            else if (currentState == PAUSED) {
+                currentState = PLAYING;
+                startTime = glutGet(GLUT_ELAPSED_TIME) / 1000.0f - gameTime;
+            }
+            break;
+        case 'h': case 'H':
+            if (currentState == MENU)
+                printf("High Score: %d\n", highScore);
+            break;
         }
-        break;
-    case 'h': case 'H':
-        if (currentState == MENU)
-            printf("High Score: %d\n", highScore);
-        break;
+        glutPostRedisplay();
     }
-    glutPostRedisplay();
-}
 
-void specialKeys(int key, int x, int y) {
-    if (currentState != PLAYING) return;
-    switch (key) {
-    case GLUT_KEY_RIGHT: pacman.nextDirection = 0; break;
-    case GLUT_KEY_UP:    pacman.nextDirection = 1; break;
-    case GLUT_KEY_LEFT:  pacman.nextDirection = 2; break;
-    case GLUT_KEY_DOWN:  pacman.nextDirection = 3; break;
+    void specialKeys(int key, int x, int y) {
+        if (currentState != PLAYING) return;
+        switch (key) {
+        case GLUT_KEY_RIGHT: pacman.nextDirection = 0; break;
+        case GLUT_KEY_UP:    pacman.nextDirection = 1; break;
+        case GLUT_KEY_LEFT:  pacman.nextDirection = 2; break;
+        case GLUT_KEY_DOWN:  pacman.nextDirection = 3; break;
+        }
     }
-}
 
-void init() {
-    glClearColor(0, 0, 0, 1);
-    glMatrixMode(GL_PROJECTION); glLoadIdentity();
-    // y=0 at top, increases downward — matches maze row indexing
-    gluOrtho2D(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
-    glMatrixMode(GL_MODELVIEW);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    srand((unsigned)time(NULL));
-    resetGame();
-}
+    void init() {
+        glClearColor(0, 0, 0, 1);
+        glMatrixMode(GL_PROJECTION); glLoadIdentity();
+        // y=0 at top, increases downward — matches maze row indexing
+        gluOrtho2D(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+        glMatrixMode(GL_MODELVIEW);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        srand((unsigned)time(NULL));
+        resetGame();
+    }
 
-int main(int argc, char** argv) {
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
-    glutInitWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
-    glutInitWindowPosition(100, 80);
-    glutCreateWindow("PAC-MAN — CSE 426 Computer Graphics Lab");
-    init();
-    glutDisplayFunc(display);
-    glutKeyboardFunc(keyboard);
-    glutSpecialFunc(specialKeys);
-    glutTimerFunc(0, update, 0);
-    glutMainLoop();
-    return 0;
-}
+    int main(int argc, char** argv) {
+        glutInit(&argc, argv);
+        glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
+        glutInitWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
+        glutInitWindowPosition(100, 80);
+        glutCreateWindow("PAC-MAN — CSE 426 Computer Graphics Lab");
+        init();
+        glutDisplayFunc(display);
+        glutKeyboardFunc(keyboard);
+        glutSpecialFunc(specialKeys);
+        glutTimerFunc(0, update, 0);
+        glutMainLoop();
+        return 0;
+    }
