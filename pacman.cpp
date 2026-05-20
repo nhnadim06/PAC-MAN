@@ -295,7 +295,6 @@ void fleeGreedy(Ghost& ghost, float targetX, float targetY) {
     else if (!canMove(ghost.x, ghost.y, cur)) ghost.direction = opp;
 }
 
-
 // ===========================================================================
 // DRAWING
 // ===========================================================================
@@ -417,113 +416,130 @@ void drawGhost(Ghost& g) {
         }
     }
 
+    // Dome
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(x, y);
+    for (int i = 0; i <= 180; i += 10) {
+        float a = i * M_PI / 180.0f;
+        glVertex2f(x + cos(a) * 8, y + sin(a) * 8);
+    }
+    glEnd();
 
+    // Wavy skirt
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(x, y);
+    glVertex2f(x - 8, y); glVertex2f(x - 6, y + 4); glVertex2f(x - 3, y);
+    glVertex2f(x, y + 4); glVertex2f(x + 3, y);   glVertex2f(x + 6, y + 4); glVertex2f(x + 8, y);
+    glEnd();
 
+    // Eyes (white + blue pupil)
+    glColor3f(1, 1, 1);
+    drawCircle(x - 3, y - 2, 2, 16); drawCircle(x + 3, y - 2, 2, 16);
+    glColor3f(0, 0, 1);
+    drawCircle(x - 3, y - 2, 1, 16); drawCircle(x + 3, y - 2, 1, 16);
+}
 
+// ===========================================================================
+// GLUT CALLBACKS
+// ===========================================================================
 
+void display() {
+    glClear(GL_COLOR_BUFFER_BIT);
 
-
-    // ===========================================================================
-    // GLUT CALLBACKS
-    // ===========================================================================
-
-    void display() {
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        switch (currentState) {
-        case MENU:
-            drawMenu();
-            break;
-        case PAUSED:
-            drawMaze(); drawPacman();
-            for (int i = 0;i < 4;i++) drawGhost(ghosts[i]);
-            drawHUD(); drawPauseScreen();
-            break;
-        case PLAYING:
-            drawMaze(); drawPacman();
-            for (int i = 0;i < 4;i++) drawGhost(ghosts[i]);
-            drawHUD();
-            break;
-        case GAME_OVER: drawGameOver(); break;
-        case WIN:       drawWinScreen(); break;
-        }
-
-        glutSwapBuffers();
+    switch (currentState) {
+    case MENU:
+        drawMenu();
+        break;
+    case PAUSED:
+        drawMaze(); drawPacman();
+        for (int i = 0;i < 4;i++) drawGhost(ghosts[i]);
+        drawHUD(); drawPauseScreen();
+        break;
+    case PLAYING:
+        drawMaze(); drawPacman();
+        for (int i = 0;i < 4;i++) drawGhost(ghosts[i]);
+        drawHUD();
+        break;
+    case GAME_OVER: drawGameOver(); break;
+    case WIN:       drawWinScreen(); break;
     }
 
-    void update(int v) {
+    glutSwapBuffers();
+}
+
+void update(int v) {
+    if (currentState == PLAYING) {
+        gameTime = glutGet(GLUT_ELAPSED_TIME) / 1000.0f - startTime;
+        updatePacman();
+        updateGhosts();
+    }
+    glutPostRedisplay();
+    glutTimerFunc(16, update, 0); // ~60 fps
+}
+
+void keyboard(unsigned char key, int x, int y) {
+    switch (key) {
+    case 27: // ESC
+        if (currentState == PLAYING || currentState == PAUSED ||
+            currentState == GAME_OVER || currentState == WIN)
+            currentState = MENU;
+        else exit(0);
+        break;
+    case ' ':
+        if (currentState == MENU || currentState == GAME_OVER || currentState == WIN) {
+            resetGame(); currentState = PLAYING;
+        }
+        break;
+    case 'p': case 'P':
         if (currentState == PLAYING) {
-            gameTime = glutGet(GLUT_ELAPSED_TIME) / 1000.0f - startTime;
-            updatePacman();
-            updateGhosts();
+            currentState = PAUSED;
         }
-        glutPostRedisplay();
-        glutTimerFunc(16, update, 0); // ~60 fps
-    }
-
-    void keyboard(unsigned char key, int x, int y) {
-        switch (key) {
-        case 27: // ESC
-            if (currentState == PLAYING || currentState == PAUSED ||
-                currentState == GAME_OVER || currentState == WIN)
-                currentState = MENU;
-            else exit(0);
-            break;
-        case ' ':
-            if (currentState == MENU || currentState == GAME_OVER || currentState == WIN) {
-                resetGame(); currentState = PLAYING;
-            }
-            break;
-        case 'p': case 'P':
-            if (currentState == PLAYING) {
-                currentState = PAUSED;
-            }
-            else if (currentState == PAUSED) {
-                currentState = PLAYING;
-                startTime = glutGet(GLUT_ELAPSED_TIME) / 1000.0f - gameTime;
-            }
-            break;
-        case 'h': case 'H':
-            if (currentState == MENU)
-                printf("High Score: %d\n", highScore);
-            break;
+        else if (currentState == PAUSED) {
+            currentState = PLAYING;
+            startTime = glutGet(GLUT_ELAPSED_TIME) / 1000.0f - gameTime;
         }
-        glutPostRedisplay();
+        break;
+    case 'h': case 'H':
+        if (currentState == MENU)
+            printf("High Score: %d\n", highScore);
+        break;
     }
+    glutPostRedisplay();
+}
 
-    void specialKeys(int key, int x, int y) {
-        if (currentState != PLAYING) return;
-        switch (key) {
-        case GLUT_KEY_RIGHT: pacman.nextDirection = 0; break;
-        case GLUT_KEY_UP:    pacman.nextDirection = 1; break;
-        case GLUT_KEY_LEFT:  pacman.nextDirection = 2; break;
-        case GLUT_KEY_DOWN:  pacman.nextDirection = 3; break;
-        }
+void specialKeys(int key, int x, int y) {
+    if (currentState != PLAYING) return;
+    switch (key) {
+    case GLUT_KEY_RIGHT: pacman.nextDirection = 0; break;
+    case GLUT_KEY_UP:    pacman.nextDirection = 1; break;
+    case GLUT_KEY_LEFT:  pacman.nextDirection = 2; break;
+    case GLUT_KEY_DOWN:  pacman.nextDirection = 3; break;
     }
+}
 
-    void init() {
-        glClearColor(0, 0, 0, 1);
-        glMatrixMode(GL_PROJECTION); glLoadIdentity();
-        // y=0 at top, increases downward — matches maze row indexing
-        gluOrtho2D(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
-        glMatrixMode(GL_MODELVIEW);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        srand((unsigned)time(NULL));
-        resetGame();
-    }
+void init() {
+    glClearColor(0, 0, 0, 1);
+    glMatrixMode(GL_PROJECTION); glLoadIdentity();
+    // y=0 at top, increases downward — matches maze row indexing
+    gluOrtho2D(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+    glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    srand((unsigned)time(NULL));
+    resetGame();
+}
 
-    int main(int argc, char** argv) {
-        glutInit(&argc, argv);
-        glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
-        glutInitWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
-        glutInitWindowPosition(100, 80);
-        glutCreateWindow("PAC-MAN — CSE 426 Computer Graphics Lab");
-        init();
-        glutDisplayFunc(display);
-        glutKeyboardFunc(keyboard);
-        glutSpecialFunc(specialKeys);
-        glutTimerFunc(0, update, 0);
-        glutMainLoop();
-        return 0;
-    }
+int main(int argc, char** argv) {
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
+    glutInitWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
+    glutInitWindowPosition(100, 80);
+    glutCreateWindow("PAC-MAN — CSE 426 Computer Graphics Lab");
+    init();
+    glutDisplayFunc(display);
+    glutKeyboardFunc(keyboard);
+    glutSpecialFunc(specialKeys);
+    glutTimerFunc(0, update, 0);
+    glutMainLoop();
+    return 0;
+}
