@@ -298,6 +298,169 @@ void fleeGreedy(Ghost& ghost, float targetX, float targetY) {
 
 
 
+void drawText(float x, float y, const char *text, void *font = GLUT_BITMAP_HELVETICA_18) {
+    glRasterPos2f(x, y);
+    for (const char *c = text; *c; c++)
+        glutBitmapCharacter(font, *c);
+}
+
+void drawLargeText(float x, float y, const char *text) {
+    drawText(x, y, text, GLUT_BITMAP_TIMES_ROMAN_24);
+}
+
+// Side panel HUD
+void drawHUD() {
+    float px = (float)(MAZE_OFFSET_X + MAZE_WIDTH * CELL_SIZE + 20);
+    float py = 60.0f;
+    char buf[64];
+
+    glColor3f(1.0f, 1.0f, 0.0f);
+    drawLargeText(px, py, "PAC-MAN");
+    py += 40;
+
+    glColor3f(0.8f, 0.8f, 0.8f);
+    drawText(px, py, "SCORE"); py += 22;
+    snprintf(buf, sizeof(buf), "%d", pacman.score);
+    glColor3f(1,1,1); drawLargeText(px, py, buf); py += 36;
+
+    glColor3f(0.8f, 0.8f, 0.8f);
+    drawText(px, py, "HIGH SCORE"); py += 22;
+    snprintf(buf, sizeof(buf), "%d", highScore);
+    glColor3f(1,1,0); drawLargeText(px, py, buf); py += 36;
+
+    glColor3f(0.8f, 0.8f, 0.8f);
+    drawText(px, py, "TIME"); py += 22;
+    snprintf(buf, sizeof(buf), "%.1f s", gameTime);
+    glColor3f(1,1,1); drawText(px, py, buf); py += 34;
+
+    glColor3f(0.8f, 0.8f, 0.8f);
+    drawText(px, py, "DOTS"); py += 22;
+    snprintf(buf, sizeof(buf), "%d / %d", dotsEaten, totalDots);
+    glColor3f(1,1,1); drawText(px, py, buf); py += 34;
+
+    // Lives shown as small Pac-Man circles
+    glColor3f(0.8f, 0.8f, 0.8f);
+    drawText(px, py, "LIVES"); py += 22;
+    for (int i = 0; i < pacman.lives; i++) {
+        glColor3f(1,1,0);
+        drawCircle(px + 10 + i * 22, py - 5, 7, 20);
+    }
+    py += 30;
+
+    // Energized status
+    if (pacman.energizedTimer > 0.0f) {
+        glColor3f(1.0f, 1.0f, 0.2f);
+        snprintf(buf, sizeof(buf), "POWER %.1fs", pacman.energizedTimer);
+        drawText(px, py, buf); py += 24;
+    }
+
+    if (pacman.invincibleTimer > 0.0f) {
+        glColor3f(0.6f, 0.6f, 1.0f);
+        drawText(px, py, "SAFE...");
+    }
+
+    // Controls reminder at bottom
+    glColor3f(0.4f, 0.4f, 0.4f);
+    drawText(px, WINDOW_HEIGHT - 100, "Arrow keys: move");
+    drawText(px, WINDOW_HEIGHT -  80, "P: pause");
+    drawText(px, WINDOW_HEIGHT -  60, "ESC: menu");
+}
+
+void drawMenu() {
+    glColor3f(1.0f, 1.0f, 0.0f);
+    drawLargeText(330, 120, "PAC-MAN");
+
+    glColor3f(0.8f, 0.8f, 0.0f);
+    drawText(330, 150, "CSE 426  Computer Graphics Lab");
+
+    // Decorative ghost row
+    Ghost dg;
+    dg.eaten=false; dg.frightened=false;
+    float dy = 210;
+    for (int c = 0; c < 4; c++) {
+        dg.color=c; dg.x=(280+c*50)/(float)CELL_SIZE - (float)MAZE_OFFSET_X/CELL_SIZE;
+        dg.y=dy/(float)CELL_SIZE - (float)MAZE_OFFSET_Y/CELL_SIZE;
+        float gx=280+c*50, gy=dy;
+        // draw directly
+        switch(c){
+            case 0:glColor3f(1,0,0);break;
+            case 1:glColor3f(1,.75f,.8f);break;
+            case 2:glColor3f(0,1,1);break;
+            case 3:glColor3f(1,.65f,0);break;
+        }
+        glBegin(GL_TRIANGLE_FAN); glVertex2f(gx,gy);
+        for(int i=0;i<=180;i+=10){float a=i*M_PI/180.0f;glVertex2f(gx+cos(a)*12,gy+sin(a)*12);}
+        glEnd();
+        glBegin(GL_TRIANGLE_FAN);
+        glVertex2f(gx,gy);
+        glVertex2f(gx-12,gy);glVertex2f(gx-9,gy+6);glVertex2f(gx-4,gy);
+        glVertex2f(gx,gy+6);glVertex2f(gx+4,gy);glVertex2f(gx+9,gy+6);glVertex2f(gx+12,gy);
+        glEnd();
+        glColor3f(1,1,1);drawCircle(gx-4,gy-3,3,16);drawCircle(gx+4,gy-3,3,16);
+        glColor3f(0,0,1);drawCircle(gx-4,gy-3,1.5f,16);drawCircle(gx+4,gy-3,1.5f,16);
+    }
+
+    glColor3f(1,1,1);
+    drawLargeText(290, 290, "Press SPACE to Start");
+
+    glColor3f(0.7f, 0.7f, 0.7f);
+    drawText(315, 340, "Press H to see High Score");
+    drawText(315, 370, "Arrow Keys to move  |  P to pause");
+    drawText(315, 400, "Eat power pellets to frighten ghosts!");
+    drawText(315, 430, "Press ESC to Exit");
+
+    char buf[64];
+    glColor3f(1,1,0);
+    snprintf(buf, sizeof(buf), "Best Time: %s", highScore > 0 ? "recorded" : "none yet");
+    drawText(320, 470, buf);
+}
+
+void drawPauseScreen() {
+    // Semi-transparent overlay
+    glColor4f(0,0,0,0.5f);
+    glBegin(GL_QUADS);
+    glVertex2f(0,0);glVertex2f(WINDOW_WIDTH,0);
+    glVertex2f(WINDOW_WIDTH,WINDOW_HEIGHT);glVertex2f(0,WINDOW_HEIGHT);
+    glEnd();
+
+    glColor3f(1,1,0);
+    drawLargeText(350, 260, "PAUSED");
+    glColor3f(1,1,1);
+    drawText(300, 310, "Press P to Resume");
+    drawText(300, 340, "Press ESC to return to Menu");
+}
+
+void drawGameOver() {
+    glColor3f(1,0,0); drawLargeText(320, 220, "GAME OVER");
+    glColor3f(1,1,1);
+    char buf[64];
+    snprintf(buf,sizeof(buf),"Final Score: %d", pacman.score); drawText(300,280,buf);
+    snprintf(buf,sizeof(buf),"Time: %.1f seconds", gameTime);  drawText(300,310,buf);
+    if (pacman.score > highScore) {
+        glColor3f(1,1,0); drawText(285,345,"** NEW HIGH SCORE! **");
+    }
+    glColor3f(0.8f,0.8f,0.8f);
+    drawText(270,390,"Press SPACE to Play Again");
+    drawText(285,420,"Press ESC for Menu");
+}
+
+void drawWinScreen() {
+    glColor3f(0,1,0); drawLargeText(330, 210, "YOU WIN!");
+    glColor3f(1,1,1);
+    char buf[64];
+    snprintf(buf,sizeof(buf),"Score: %d", pacman.score);      drawText(310,270,buf);
+    snprintf(buf,sizeof(buf),"Time: %.1f s", gameTime);       drawText(310,300,buf);
+    if (pacman.score > highScore) {
+        glColor3f(1,1,0); drawText(290,335,"** NEW HIGH SCORE! **");
+    }
+    glColor3f(0.8f,0.8f,0.8f);
+    drawText(270,385,"Press SPACE to Play Again");
+    drawText(285,415,"Press ESC for Menu");
+}
+
+// ===========================================================================
+// UPDATE
+// ===========================================================================
 
 // ===========================================================================
 // GLUT CALLBACKS
